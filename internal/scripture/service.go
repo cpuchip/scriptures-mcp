@@ -1,134 +1,193 @@
 package scripture
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
+	"os"
+	"path/filepath"
 	"regexp"
+	"strconv"
+	"strings"
+
+	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // Scripture represents a scripture verse
 type Scripture struct {
-	Book    string `json:"book"`
-	Chapter int    `json:"chapter"`
-	Verse   int    `json:"verse"`
-	Text    string `json:"text"`
+	Book      string `json:"book"`
+	Chapter   int    `json:"chapter"`
+	Verse     int    `json:"verse"`
+	Text      string `json:"text"`
+	Reference string `json:"reference"`
 }
 
 // ScriptureReference represents a parsed scripture reference
 type ScriptureReference struct {
-	Book    string `json:"book"`
-	Chapter int    `json:"chapter"`
-	Verse   int    `json:"verse,omitempty"`
-	EndVerse int   `json:"endVerse,omitempty"`
+	Book     string `json:"book"`
+	Chapter  int    `json:"chapter"`
+	Verse    int    `json:"verse,omitempty"`
+	EndVerse int    `json:"endVerse,omitempty"`
 }
 
 // Service handles scripture operations
 type Service struct {
-	// In a real implementation, this would connect to a scripture database or API
-	// For now, we'll use some sample data
+	scriptures map[string][]Scripture // Map of book name to scriptures
 }
 
 // NewService creates a new scripture service
 func NewService() *Service {
-	return &Service{}
+	service := &Service{
+		scriptures: make(map[string][]Scripture),
+	}
+	service.loadScriptures()
+	return service
+}
+
+// loadScriptures loads scripture data from JSON files
+func (s *Service) loadScriptures() {
+	dataDir := "data"
+	
+	files := []string{
+		"book-of-mormon.json",
+		"doctrine-and-covenants.json",
+		"pearl-of-great-price.json",
+		"old-testament.json",
+		"new-testament.json",
+	}
+	
+	for _, filename := range files {
+		filepath := filepath.Join(dataDir, filename)
+		s.loadScriptureFile(filepath)
+	}
+}
+
+// ScriptureData represents the structure of the scripture JSON files
+type ScriptureData struct {
+	Books []struct {
+		Book     string `json:"book"`
+		Chapters []struct {
+			Chapter int `json:"chapter"`
+			Verses  []struct {
+				Verse     int    `json:"verse"`
+				Text      string `json:"text"`
+				Reference string `json:"reference"`
+			} `json:"verses"`
+		} `json:"chapters"`
+	} `json:"books"`
+}
+
+// loadScriptureFile loads scriptures from a single JSON file
+func (s *Service) loadScriptureFile(filepath string) {
+	data, err := os.ReadFile(filepath)
+	if err != nil {
+		fmt.Printf("Warning: Could not read %s: %v\n", filepath, err)
+		return
+	}
+	
+	var scriptureData ScriptureData
+	if err := json.Unmarshal(data, &scriptureData); err != nil {
+		fmt.Printf("Warning: Could not parse %s: %v\n", filepath, err)
+		return
+	}
+	
+	for _, book := range scriptureData.Books {
+		for _, chapter := range book.Chapters {
+			for _, verse := range chapter.Verses {
+				scripture := Scripture{
+					Book:      book.Book,
+					Chapter:   chapter.Chapter,
+					Verse:     verse.Verse,
+					Text:      verse.Text,
+					Reference: verse.Reference,
+				}
+				s.scriptures[book.Book] = append(s.scriptures[book.Book], scripture)
+			}
+		}
+	}
 }
 
 // SearchScriptures searches for scriptures by keyword or phrase
-func (s *Service) SearchScriptures(params json.RawMessage) (interface{}, error) {
-	var args struct {
-		Query string `json:"query"`
-		Limit int    `json:"limit,omitempty"`
+func (s *Service) SearchScriptures(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	arguments := request.GetArguments()
+	
+	query, ok := arguments["query"].(string)
+	if !ok || query == "" {
+		return mcp.NewToolResultError("search query cannot be empty"), nil
 	}
 	
-	if err := json.Unmarshal(params, &args); err != nil {
-		return nil, fmt.Errorf("invalid search parameters: %v", err)
+	limit := 10 // default
+	if limitVal, exists := arguments["limit"]; exists {
+		if limitFloat, ok := limitVal.(float64); ok {
+			limit = int(limitFloat)
+		}
 	}
 	
-	if args.Query == "" {
-		return nil, fmt.Errorf("search query cannot be empty")
+	// Perform the search
+	results := s.performSearch(query, limit)
+	
+	if len(results) == 0 {
+		return mcp.NewToolResultText(fmt.Sprintf("No scriptures found matching '%s'. Try different keywords or check spelling.", query)), nil
 	}
 	
-	if args.Limit == 0 {
-		args.Limit = 10
-	}
-	
-	// For demonstration, return sample search results
-	// In a real implementation, this would query a scripture database
-	results := s.performSearch(args.Query, args.Limit)
-	
-	response := fmt.Sprintf("Scripture Search Results for '%s':\n\n", args.Query)
+	response := fmt.Sprintf("Scripture Search Results for '%s':\n\n", query)
 	for i, result := range results {
 		response += fmt.Sprintf("%d. %s %d:%d - %s\n\n", i+1, result.Book, result.Chapter, result.Verse, result.Text)
 	}
 	
-	if len(results) == 0 {
-		response = fmt.Sprintf("No scriptures found matching '%s'. Try different keywords or check spelling.", args.Query)
-	}
-	
-	return response, nil
+	return mcp.NewToolResultText(response), nil
 }
 
 // GetScripture retrieves a specific scripture reference
-func (s *Service) GetScripture(params json.RawMessage) (interface{}, error) {
-	var args struct {
-		Reference string `json:"query"`
-	}
+func (s *Service) GetScripture(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	arguments := request.GetArguments()
 	
-	if err := json.Unmarshal(params, &args); err != nil {
-		return nil, fmt.Errorf("invalid reference parameters: %v", err)
-	}
-	
-	if args.Reference == "" {
-		return nil, fmt.Errorf("scripture reference cannot be empty")
+	query, ok := arguments["query"].(string)
+	if !ok || query == "" {
+		return mcp.NewToolResultError("scripture reference cannot be empty"), nil
 	}
 	
 	// Parse the reference
-	ref, err := s.parseReference(args.Reference)
+	ref, err := s.parseReference(query)
 	if err != nil {
-		return nil, fmt.Errorf("invalid scripture reference: %v", err)
+		return mcp.NewToolResultError(fmt.Sprintf("invalid scripture reference: %v", err)), nil
 	}
 	
 	// Get the scripture(s)
 	scriptures := s.getScripturesByReference(ref)
 	
 	if len(scriptures) == 0 {
-		return fmt.Sprintf("Scripture reference '%s' not found.", args.Reference), nil
+		return mcp.NewToolResultText(fmt.Sprintf("Scripture reference '%s' not found.", query)), nil
 	}
 	
-	response := fmt.Sprintf("Scripture Reference: %s\n\n", args.Reference)
+	response := fmt.Sprintf("Scripture Reference: %s\n\n", query)
 	for _, scripture := range scriptures {
 		response += fmt.Sprintf("%s %d:%d - %s\n\n", scripture.Book, scripture.Chapter, scripture.Verse, scripture.Text)
 	}
 	
-	return response, nil
+	return mcp.NewToolResultText(response), nil
 }
 
 // GetChapter retrieves a full chapter from scriptures
-func (s *Service) GetChapter(params json.RawMessage) (interface{}, error) {
-	var args struct {
-		Reference string `json:"query"`
-	}
+func (s *Service) GetChapter(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	arguments := request.GetArguments()
 	
-	if err := json.Unmarshal(params, &args); err != nil {
-		return nil, fmt.Errorf("invalid chapter parameters: %v", err)
-	}
-	
-	if args.Reference == "" {
-		return nil, fmt.Errorf("chapter reference cannot be empty")
+	query, ok := arguments["query"].(string)
+	if !ok || query == "" {
+		return mcp.NewToolResultError("chapter reference cannot be empty"), nil
 	}
 	
 	// Parse the reference (should be book chapter format)
-	ref, err := s.parseChapterReference(args.Reference)
+	ref, err := s.parseChapterReference(query)
 	if err != nil {
-		return nil, fmt.Errorf("invalid chapter reference: %v", err)
+		return mcp.NewToolResultError(fmt.Sprintf("invalid chapter reference: %v", err)), nil
 	}
 	
 	// Get the entire chapter
 	scriptures := s.getChapter(ref.Book, ref.Chapter)
 	
 	if len(scriptures) == 0 {
-		return fmt.Sprintf("Chapter '%s' not found.", args.Reference), nil
+		return mcp.NewToolResultText(fmt.Sprintf("Chapter '%s' not found.", query)), nil
 	}
 	
 	response := fmt.Sprintf("%s Chapter %d\n\n", ref.Book, ref.Chapter)
@@ -136,32 +195,23 @@ func (s *Service) GetChapter(params json.RawMessage) (interface{}, error) {
 		response += fmt.Sprintf("%d. %s\n\n", scripture.Verse, scripture.Text)
 	}
 	
-	return response, nil
+	return mcp.NewToolResultText(response), nil
 }
 
-// performSearch performs a keyword search (sample implementation)
+// performSearch performs a keyword search through loaded scripture data
 func (s *Service) performSearch(query string, limit int) []Scripture {
-	// Sample scripture data - in a real implementation, this would query a database
-	sampleScriptures := []Scripture{
-		{Book: "1 Nephi", Chapter: 3, Verse: 7, Text: "And it came to pass that I, Nephi, said unto my father: I will go and do the things which the Lord hath commanded, for I know that the Lord giveth no commandments unto the children of men, save he shall prepare a way for them that they may accomplish the thing which he commandeth them."},
-		{Book: "2 Nephi", Chapter: 2, Verse: 25, Text: "Adam fell that men might be; and men are, that they might have joy."},
-		{Book: "Alma", Chapter: 32, Verse: 21, Text: "And now as I said concerning faith—faith is not to have a perfect knowledge of things; therefore if ye have faith ye hope for things which are not seen, which are true."},
-		{Book: "Moroni", Chapter: 10, Verse: 4, Text: "And when ye shall receive these things, I would exhort you that ye would ask God, the Eternal Father, in the name of Christ, if these things are not true; and if ye shall ask with a sincere heart, with real intent, having faith in Christ, he will manifest the truth of it unto you, by the power of the Holy Ghost."},
-		{Book: "John", Chapter: 3, Verse: 16, Text: "For God so loved the world, that he gave his only begotten Son, that whosoever believeth in him should not perish, but have everlasting life."},
-		{Book: "Matthew", Chapter: 5, Verse: 16, Text: "Let your light so shine before men, that they may see your good works, and glorify your Father which is in heaven."},
-		{Book: "D&C", Chapter: 76, Verse: 22, Text: "And now, after the many testimonies which have been given of him, this is the testimony, last of all, which we give of him: That he lives!"},
-		{Book: "Moses", Chapter: 1, Verse: 39, Text: "For behold, this is my work and my glory—to bring to pass the immortality and eternal life of man."},
-	}
-	
 	var results []Scripture
 	queryLower := strings.ToLower(query)
 	
-	for _, scripture := range sampleScriptures {
-		if strings.Contains(strings.ToLower(scripture.Text), queryLower) ||
-		   strings.Contains(strings.ToLower(scripture.Book), queryLower) {
-			results = append(results, scripture)
-			if len(results) >= limit {
-				break
+	// Search through all loaded scriptures
+	for _, bookScriptures := range s.scriptures {
+		for _, scripture := range bookScriptures {
+			if strings.Contains(strings.ToLower(scripture.Text), queryLower) ||
+			   strings.Contains(strings.ToLower(scripture.Book), queryLower) {
+				results = append(results, scripture)
+				if len(results) >= limit {
+					return results
+				}
 			}
 		}
 	}
@@ -180,12 +230,21 @@ func (s *Service) parseReference(reference string) (*ScriptureReference, error) 
 	}
 	
 	book := strings.TrimSpace(matches[1])
-	chapter := parseInt(matches[2])
-	verse := parseInt(matches[3])
+	chapter, err := strconv.Atoi(matches[2])
+	if err != nil {
+		return nil, fmt.Errorf("invalid chapter number: %s", matches[2])
+	}
+	verse, err := strconv.Atoi(matches[3])
+	if err != nil {
+		return nil, fmt.Errorf("invalid verse number: %s", matches[3])
+	}
 	endVerse := verse
 	
 	if matches[4] != "" {
-		endVerse = parseInt(matches[4])
+		endVerse, err = strconv.Atoi(matches[4])
+		if err != nil {
+			return nil, fmt.Errorf("invalid end verse number: %s", matches[4])
+		}
 	}
 	
 	return &ScriptureReference{
@@ -207,7 +266,10 @@ func (s *Service) parseChapterReference(reference string) (*ScriptureReference, 
 	}
 	
 	book := strings.TrimSpace(matches[1])
-	chapter := parseInt(matches[2])
+	chapter, err := strconv.Atoi(matches[2])
+	if err != nil {
+		return nil, fmt.Errorf("invalid chapter number: %s", matches[2])
+	}
 	
 	return &ScriptureReference{
 		Book:    book,
@@ -215,40 +277,17 @@ func (s *Service) parseChapterReference(reference string) (*ScriptureReference, 
 	}, nil
 }
 
-// getScripturesByReference retrieves scriptures by reference
+// getScripturesByReference retrieves scriptures by reference from loaded data
 func (s *Service) getScripturesByReference(ref *ScriptureReference) []Scripture {
-	// Sample implementation - would query database in real version
-	sampleData := map[string]map[int]map[int]string{
-		"1 Nephi": {
-			3: {
-				7: "And it came to pass that I, Nephi, said unto my father: I will go and do the things which the Lord hath commanded, for I know that the Lord giveth no commandments unto the children of men, save he shall prepare a way for them that they may accomplish the thing which he commandeth them.",
-			},
-		},
-		"John": {
-			3: {
-				16: "For God so loved the world, that he gave his only begotten Son, that whosoever believeth in him should not perish, but have everlasting life.",
-			},
-		},
-		"Moroni": {
-			10: {
-				4: "And when ye shall receive these things, I would exhort you that ye would ask God, the Eternal Father, in the name of Christ, if these things are not true; and if ye shall ask with a sincere heart, with real intent, having faith in Christ, he will manifest the truth of it unto you, by the power of the Holy Ghost.",
-			},
-		},
-	}
-	
 	var results []Scripture
 	
-	if bookData, exists := sampleData[ref.Book]; exists {
-		if chapterData, exists := bookData[ref.Chapter]; exists {
-			for verse := ref.Verse; verse <= ref.EndVerse; verse++ {
-				if text, exists := chapterData[verse]; exists {
-					results = append(results, Scripture{
-						Book:    ref.Book,
-						Chapter: ref.Chapter,
-						Verse:   verse,
-						Text:    text,
-					})
-				}
+	// Find scriptures matching the reference
+	if bookScriptures, exists := s.scriptures[ref.Book]; exists {
+		for _, scripture := range bookScriptures {
+			if scripture.Chapter == ref.Chapter &&
+			   scripture.Verse >= ref.Verse && 
+			   scripture.Verse <= ref.EndVerse {
+				results = append(results, scripture)
 			}
 		}
 	}
@@ -256,31 +295,18 @@ func (s *Service) getScripturesByReference(ref *ScriptureReference) []Scripture 
 	return results
 }
 
-// getChapter retrieves an entire chapter
+// getChapter retrieves an entire chapter from loaded data
 func (s *Service) getChapter(book string, chapter int) []Scripture {
-	// Sample chapter data - would query database in real version
-	if book == "1 Nephi" && chapter == 3 {
-		return []Scripture{
-			{Book: "1 Nephi", Chapter: 3, Verse: 1, Text: "And it came to pass that I, Nephi, returned from speaking with the Lord, to the tent of my father."},
-			{Book: "1 Nephi", Chapter: 3, Verse: 2, Text: "And it came to pass that he spake unto me, saying: Behold I have dreamed a dream, wherein the Lord hath commanded me that thou and thy brethren shall return to Jerusalem."},
-			{Book: "1 Nephi", Chapter: 3, Verse: 3, Text: "For behold, Laban hath the record of the Jews and also a genealogy of my forefathers, and they are engraven upon plates of brass."},
-			{Book: "1 Nephi", Chapter: 3, Verse: 4, Text: "Wherefore, the Lord hath commanded me that thou and thy brothers should go unto the house of Laban, and seek the records, and bring them down hither into the wilderness."},
-			{Book: "1 Nephi", Chapter: 3, Verse: 5, Text: "And now, behold thy brothers murmur, saying it is a hard thing which I have required of them; but behold I have not required it of them, but it is a commandment of the Lord."},
-			{Book: "1 Nephi", Chapter: 3, Verse: 6, Text: "Therefore go, my son, and thou shalt be favored of the Lord, because thou hast not murmured."},
-			{Book: "1 Nephi", Chapter: 3, Verse: 7, Text: "And it came to pass that I, Nephi, said unto my father: I will go and do the things which the Lord hath commanded, for I know that the Lord giveth no commandments unto the children of men, save he shall prepare a way for them that they may accomplish the thing which he commandeth them."},
+	var results []Scripture
+	
+	// Find all scriptures in the specified book and chapter
+	if bookScriptures, exists := s.scriptures[book]; exists {
+		for _, scripture := range bookScriptures {
+			if scripture.Chapter == chapter {
+				results = append(results, scripture)
+			}
 		}
 	}
 	
-	return []Scripture{}
-}
-
-// parseInt converts string to int, returns 0 if conversion fails
-func parseInt(s string) int {
-	var result int
-	for _, r := range s {
-		if r >= '0' && r <= '9' {
-			result = result*10 + int(r-'0')
-		}
-	}
-	return result
+	return results
 }
