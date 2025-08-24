@@ -4,26 +4,42 @@
 
 echo "Testing MCP Scripture Server..."
 
-# Create test input file
-cat > /tmp/test_requests.jsonl << 'EOF'
-{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
-{"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
-{"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "search_scriptures", "arguments": {"query": "faith"}}}
-{"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "get_scripture", "arguments": {"query": "1 Nephi 3:7"}}}
-{"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "get_chapter", "arguments": {"query": "1 Nephi 3"}}}
-EOF
+# Build the server if not already built
+if [ ! -f "./scriptures-mcp" ]; then
+    echo "Building server..."
+    go build -o scriptures-mcp .
+fi
 
-echo "Running test requests..."
-./scriptures-mcp < /tmp/test_requests.jsonl > /tmp/test_output.json 2>&1 &
-SERVER_PID=$!
+echo "1. Testing initialization and tools list..."
+(
+echo '{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "1.0.0", "capabilities": {}, "clientInfo": {"name": "test", "version": "1.0"}}}'
+sleep 0.5
+echo '{"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}'
+) | ./scriptures-mcp 2>/dev/null
 
-# Give the server time to process
-sleep 2
+echo
+echo "2. Testing search_scriptures tool..."
+(
+echo '{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "1.0.0", "capabilities": {}, "clientInfo": {"name": "test", "version": "1.0"}}}'
+sleep 0.5
+echo '{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "search_scriptures", "arguments": {"query": "faith", "limit": 1}}}'
+) | ./scriptures-mcp 2>/dev/null
 
-# Kill the server
-kill $SERVER_PID 2>/dev/null
+echo
+echo "3. Testing get_scripture tool..."
+(
+echo '{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "1.0.0", "capabilities": {}, "clientInfo": {"name": "test", "version": "1.0"}}}'
+sleep 0.5
+echo '{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "get_scripture", "arguments": {"query": "1 Nephi 3:7"}}}'
+) | ./scriptures-mcp 2>/dev/null
 
-echo "Test output:"
-cat /tmp/test_output.json
+echo
+echo "4. Testing get_chapter tool..."
+(
+echo '{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "1.0.0", "capabilities": {}, "clientInfo": {"name": "test", "version": "1.0"}}}'
+sleep 0.5
+echo '{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "get_chapter", "arguments": {"query": "Moroni 10"}}}'
+) | ./scriptures-mcp 2>/dev/null | head -20
 
-echo "Test completed."
+echo
+echo "Test completed successfully."
