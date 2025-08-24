@@ -131,11 +131,49 @@ echo '{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVe
 
 ## Data Sources
 
-The scripture data comes from the [scriptures-json](https://github.com/bcbooks/scriptures-json) repository, which provides:
-- Complete text of all standard works
-- JSON format with books, chapters, and verses
-- Proper verse references and citations
-- Based on official 2013 LDS edition
+### Scripture Data Attribution
+
+This project uses scripture data from the excellent [bcbooks/scriptures-json](https://github.com/bcbooks/scriptures-json) repository. We are grateful to the maintainers of this project for providing:
+
+- **Complete text** of all standard works of The Church of Jesus Christ of Latter-day Saints
+- **Structured JSON format** with books, chapters, and verses for easy parsing
+- **Accurate references** and proper verse citations
+- **2013 LDS edition** text ensuring consistency with official sources
+
+#### Data Files Included:
+- `book-of-mormon.json` - Complete Book of Mormon (2.7MB)
+- `old-testament.json` - Old Testament from KJV Bible (7.8MB)  
+- `new-testament.json` - New Testament from KJV Bible (2.5MB)
+- `doctrine-and-covenants.json` - Complete Doctrine and Covenants (891KB)
+- `pearl-of-great-price.json` - Complete Pearl of Great Price (269KB)
+
+**Total scripture database: ~13.6MB** providing access to 66+ books and 31,000+ verses.
+
+#### Keeping Data Up to Date
+
+The scripture data in this repository is currently a snapshot from [scriptures-json](https://github.com/bcbooks/scriptures-json). 
+
+**Automated Data Sync:**
+We provide a script to automatically sync with the latest scripture data:
+
+```bash
+# Run the data sync script
+./sync-data.sh
+```
+
+This script will:
+1. Clone the latest version of the scriptures-json repository
+2. Copy the required JSON files to the `/data` directory  
+3. Show you what files were updated
+4. Clean up temporary files
+
+**Manual Data Update:**
+For manual updates:
+1. Visit the [scriptures-json repository](https://github.com/bcbooks/scriptures-json)
+2. Download the latest JSON files from their repository
+3. Replace the files in the `/data` directory of this project
+
+**Future Enhancement:** We plan to implement automated data synchronization via GitHub Actions to keep the scripture data current with updates from the source repository.
 
 ## Benefits for AI Assistants
 
@@ -150,8 +188,10 @@ This MCP server enables AI assistants to:
 ### Project Structure
 ```
 scriptures-mcp/
-├── main.go                     # Entry point
-├── data/                       # Scripture JSON files
+├── main.go                         # Entry point
+├── main_test.go                   # Main package tests
+├── sync-data.sh                   # Scripture data sync script
+├── data/                          # Scripture JSON files
 │   ├── book-of-mormon.json
 │   ├── doctrine-and-covenants.json  
 │   ├── new-testament.json
@@ -159,12 +199,77 @@ scriptures-mcp/
 │   └── pearl-of-great-price.json
 ├── internal/
 │   └── scripture/
-│       └── service.go          # Scripture search and retrieval logic
-├── go.mod                      # Go module definition
-├── go.sum                      # Go module checksums
-├── test_server.sh             # Test script
-├── examples.sh                # Usage examples
+│       ├── service.go             # Scripture search and retrieval logic
+│       └── service_test.go        # Comprehensive unit tests
+├── .github/
+│   └── workflows/
+│       └── ci.yml                 # GitHub Actions CI/CD pipeline
+├── go.mod                         # Go module definition
+├── go.sum                         # Go module checksums
+├── test_server.sh                 # Integration test script
+├── examples.sh                    # Usage examples
 └── README.md
+```
+
+### Running Tests
+
+This project includes comprehensive unit tests using Go's built-in testing framework:
+
+```bash
+# Run all tests
+go test ./...
+
+# Run tests with verbose output
+go test -v ./...
+
+# Run tests with coverage
+go test -coverprofile=coverage.out ./...
+
+# View coverage report
+go tool cover -html=coverage.out
+```
+
+#### Test Coverage
+The tests cover:
+- Scripture data loading from JSON files
+- Search functionality across all scriptures
+- Scripture reference parsing (both verse and chapter references)  
+- Scripture retrieval by specific references
+- Chapter retrieval functionality
+- Error handling for invalid inputs
+- MCP tool integration
+
+### CI/CD Pipeline
+
+The project includes a comprehensive GitHub Actions workflow that:
+- **Runs tests** on every push and pull request
+- **Builds binaries** for multiple platforms:
+  - Linux (amd64, arm64, 386, arm)
+  - macOS (amd64, arm64) 
+  - Windows (amd64, arm64, 386)
+- **Creates releases** automatically on main branch pushes
+- **Uploads artifacts** for easy download
+
+### Building from Source
+
+```bash
+# Clone the repository
+git clone https://github.com/cpuchip/scriptures-mcp.git
+cd scriptures-mcp
+
+# Download dependencies
+go mod download
+
+# Run tests
+go test ./...
+
+# Build for current platform
+go build -o scriptures-mcp .
+
+# Build for specific platform (cross-compilation)
+GOOS=windows GOARCH=amd64 go build -o scriptures-mcp.exe .
+GOOS=linux GOARCH=arm64 go build -o scriptures-mcp-linux-arm64 .
+GOOS=darwin GOARCH=arm64 go build -o scriptures-mcp-darwin-arm64 .
 ```
 
 ## Contributing
