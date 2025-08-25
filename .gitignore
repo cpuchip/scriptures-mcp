@@ -7,6 +7,7 @@
 *.dll
 *.so
 *.dylib
+scriptures-mcp
 
 # Test binary, built with `go test -c`
 *.test
@@ -17,8 +18,16 @@ coverage.*
 *.coverprofile
 profile.cov
 
-# Dependency directories (remove the comment below to include it)
-# vendor/
+# Dependency directories
+vendor/
+
+# Common build output directories
+bin/
+build/
+dist/
+
+# Logs
+*.log
 
 # Go workspace file
 go.work
@@ -30,3 +39,6 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Temporary files
+/tmp/

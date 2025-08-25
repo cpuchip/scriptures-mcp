@@ -1,0 +1,51 @@
+{
+  "name": "scriptures-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for LDS scripture search and retrieval",
+  "server": {
+    "command": "./scriptures-mcp",
+    "args": [],
+    "env": {}
+  },
+  "capabilities": {
+    "tools": {
+      "search_scriptures": {
+        "description": "Search for scriptures by keyword or phrase",
+        "parameters": {
+          "query": {
+            "type": "string",
+            "description": "Search term or phrase",
+            "required": true
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of results",
+            "default": 10,
+            "minimum": 1,
+            "maximum": 50
+          }
+        }
+      },
+      "get_scripture": {
+        "description": "Get a specific scripture reference",
+        "parameters": {
+          "query": {
+            "type": "string",
+            "description": "Scripture reference (e.g., '1 Nephi 3:7', 'John 3:16-17')",
+            "required": true
+          }
+        }
+      },
+      "get_chapter": {
+        "description": "Get a full chapter from scriptures",
+        "parameters": {
+          "query": {
+            "type": "string",
+            "description": "Chapter reference (e.g., '1 Nephi 3', 'Matthew 5')",
+            "required": true
+          }
+        }
+      }
+    }
+  }
+}
