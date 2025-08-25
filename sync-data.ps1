@@ -33,9 +33,34 @@ try {
         Copy-Item -LiteralPath $f -Destination (Join-Path $dataDir $f) -Force
     }
 
+    # Create compressed archive (zip) for embedding
+    $zipPath = Join-Path $dataDir 'scriptures.zip'
+    if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+    try {
+        Compress-Archive -LiteralPath ($files | ForEach-Object { Join-Path $dataDir $_ }) -DestinationPath $zipPath -CompressionLevel Optimal
+    }
+    catch {
+        Write-Warning "Failed to create scriptures.zip: $_"
+    }
+    if (Test-Path $zipPath) {
+        $zipInfo = Get-Item $zipPath
+        if ($zipInfo.Length -gt 0) {
+            Write-Host "Removing original JSON files (now contained in scriptures.zip)" -ForegroundColor Cyan
+            foreach ($f in $files) {
+                $jsonPath = Join-Path $dataDir $f
+                if (Test-Path $jsonPath) { Remove-Item $jsonPath -Force }
+            }
+        } else {
+            Write-Warning "scriptures.zip is empty; keeping JSON files"
+        }
+    }
+
     Write-Host "Scripture data synchronized successfully!" -ForegroundColor Green
     Write-Host "Data files updated in: $dataDir"
-    Get-ChildItem -File $dataDir/*.json | Select-Object Name,Length | Format-Table -AutoSize
+    Get-ChildItem -File $dataDir/*.json -ErrorAction SilentlyContinue | Select-Object Name,Length | Format-Table -AutoSize
+    if (Test-Path $zipPath) {
+        Get-Item $zipPath | Select-Object Name,Length | Format-Table -AutoSize
+    }
     Write-Host "`nTo see what changed, run: git diff --stat internal/scripture/data/" -ForegroundColor Yellow
 }
 finally {

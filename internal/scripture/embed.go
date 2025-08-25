@@ -2,7 +2,7 @@ package scripture
 
 import "embed"
 
-// Embedded scripture JSON data.
-// NOTE: Ensure the JSON files are located in this package folder under data/ before building.
-//go:embed data/*.json
+// Embedded compressed scripture data (ZIP archive containing JSON files).
+// Run ./sync-data.sh (or .\sync-data.ps1) to refresh data/scriptures.zip before building.
+//go:embed data/scriptures.zip
 var embeddedData embed.FS

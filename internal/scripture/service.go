@@ -1,9 +1,12 @@
 package scripture
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -78,6 +81,15 @@ func (s *Service) loadFromEmbedded() {
 	if embeddedData == (fs.FS)(nil) { // Shouldn't happen, but guard anyway
 		return
 	}
+	// Prefer compressed archive
+	if zipBytes, err := embeddedData.ReadFile("data/scriptures.zip"); err == nil {
+		if err := s.loadFromZipBytes(zipBytes, "embedded zip"); err != nil {
+			fmt.Printf("Warning: failed to load embedded zip: %v (falling back to discrete files)\n", err)
+		} else {
+			return
+		}
+	}
+	// Fallback: discrete JSON files (development fallback if embed pattern changed)
 	files := scriptureJSONFilenames()
 	for _, f := range files {
 		data, err := embeddedData.ReadFile("data/" + f)
@@ -91,6 +103,15 @@ func (s *Service) loadFromEmbedded() {
 
 // loadFromDir loads scripture JSON files from a real directory on disk.
 func (s *Service) loadFromDir(dir string) {
+	// If a compressed archive exists, prefer it
+	zipPath := filepath.Join(dir, "scriptures.zip")
+	if data, err := os.ReadFile(zipPath); err == nil {
+		if err := s.loadFromZipBytes(data, zipPath); err == nil {
+			return
+		} else {
+			fmt.Printf("Warning: could not load %s: %v (falling back to discrete files)\n", zipPath, err)
+		}
+	}
 	files := scriptureJSONFilenames()
 	for _, f := range files {
 		path := filepath.Join(dir, f)
@@ -101,6 +122,36 @@ func (s *Service) loadFromDir(dir string) {
 		}
 		s.parseAndStore(data, f)
 	}
+}
+
+// loadFromZipBytes loads scriptures from an in-memory zip archive.
+func (s *Service) loadFromZipBytes(data []byte, label string) error {
+	r, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return err
+	}
+	for _, f := range r.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		name := f.Name
+		if !strings.HasSuffix(name, ".json") { // skip non-json
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			fmt.Printf("Warning: could not open %s in %s: %v\n", name, label, err)
+			continue
+		}
+		fileBytes, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			fmt.Printf("Warning: could not read %s in %s: %v\n", name, label, err)
+			continue
+		}
+		s.parseAndStore(fileBytes, name)
+	}
+	return nil
 }
 
 // parseAndStore parses raw JSON scripture data and stores verses in memory.
