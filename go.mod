@@ -1,8 +1,6 @@
 module github.com/cpuchip/scriptures-mcp
 
-go 1.23
-
-toolchain go1.24.6
+go 1.25.0
 
 require github.com/mark3labs/mcp-go v0.38.0
 

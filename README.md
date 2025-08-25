@@ -151,29 +151,47 @@ This project uses scripture data from the excellent [bcbooks/scriptures-json](ht
 
 #### Keeping Data Up to Date
 
-The scripture data in this repository is currently a snapshot from [scriptures-json](https://github.com/bcbooks/scriptures-json). 
+The scripture data in this repository is currently a snapshot from [scriptures-json](https://github.com/bcbooks/scriptures-json).
 
-**Automated Data Sync:**
-We provide a script to automatically sync with the latest scripture data:
+Scripture data is now stored (and embedded) as a compressed archive at:
+
+`internal/scripture/data/scriptures.zip`
+
+The individual `.json` files are removed after compression to reduce repository size; they still exist inside the zip and are loaded in‑memory at startup.
+
+**Sync Scripts (Linux/macOS & Windows):**
 
 ```bash
-# Run the data sync script
+# Linux / macOS
 ./sync-data.sh
+
+# Windows PowerShell
+pwsh ./sync-data.ps1
 ```
 
-This script will:
-1. Clone the latest version of the scriptures-json repository
-2. Copy the required JSON files to the `/data` directory  
-3. Show you what files were updated
-4. Clean up temporary files
+Each script will:
+1. Clone the upstream `bcbooks/scriptures-json` repository
+2. Copy the required JSON files into `internal/scripture/data/`
+3. Create (or replace) `scriptures.zip` containing all JSON files
+4. Delete the original JSON files after a successful zip (zip becomes the embedded source)
+5. Show updated file sizes
+6. Clean up temporary files
 
-**Manual Data Update:**
-For manual updates:
-1. Visit the [scriptures-json repository](https://github.com/bcbooks/scriptures-json)
-2. Download the latest JSON files from their repository
-3. Replace the files in the `/data` directory of this project
+**Environment Override:** At runtime you can override embedded data with an external directory (containing either `scriptures.zip` or the raw JSON files) by setting:
 
-**Future Enhancement:** We plan to implement automated data synchronization via GitHub Actions to keep the scripture data current with updates from the source repository.
+```bash
+export SCRIPTURES_DATA_DIR=/path/to/custom/data
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:SCRIPTURES_DATA_DIR = 'C:\\path\\to\\custom\\data'
+```
+
+**Manual Data Update (alternative):** Place updated `scriptures.zip` (or the raw JSON files) into a directory and point `SCRIPTURES_DATA_DIR` to it.
+
+**CI/CD Note:** The embedded archive is included at build time via Go's `//go:embed`; rebuild the binary after running a sync script to include fresh data.
 
 ## Benefits for AI Assistants
 
@@ -190,16 +208,13 @@ This MCP server enables AI assistants to:
 scriptures-mcp/
 ├── main.go                         # Entry point
 ├── main_test.go                   # Main package tests
-├── sync-data.sh                   # Scripture data sync script
-├── data/                          # Scripture JSON files
-│   ├── book-of-mormon.json
-│   ├── doctrine-and-covenants.json  
-│   ├── new-testament.json
-│   ├── old-testament.json
-│   └── pearl-of-great-price.json
+├── sync-data.sh                   # *nix data sync (creates embedded zip)
+├── sync-data.ps1                  # Windows PowerShell data sync
 ├── internal/
 │   └── scripture/
-│       ├── service.go             # Scripture search and retrieval logic
+│       ├── data/                  # Contains scriptures.zip (embedded)
+│       ├── embed.go               # go:embed directive for scriptures.zip
+│       ├── service.go             # Scripture search & retrieval logic
 │       └── service_test.go        # Comprehensive unit tests
 ├── .github/
 │   └── workflows/

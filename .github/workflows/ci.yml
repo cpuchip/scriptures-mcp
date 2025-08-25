@@ -18,7 +18,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.22'
+        go-version: '1.25'
     
     - name: Cache Go modules
       uses: actions/cache@v4
@@ -64,7 +64,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.22'
+        go-version: '1.25'
     
     - name: Cache Go modules
       uses: actions/cache@v4
@@ -126,17 +126,19 @@ jobs:
     
     - name: Upload Release Assets
       run: |
+        set -e
+        echo "Finding artifacts to upload..."
         for dir in artifacts/*/; do
-          for file in "$dir"*; do
-            if [ -f "$file" ]; then
-              filename=$(basename "$file")
-              echo "Uploading $filename"
-              curl \
-                -X POST \
-                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                -H "Content-Type: application/octet-stream" \
-                --data-binary "@$file" \
-                "${{ steps.create_release.outputs.upload_url }}?name=$filename"
-            fi
+          echo "Scanning $dir"
+          # Find all regular files recursively (will include binaries inside dist/)
+          find "$dir" -type f | while read -r file; do
+            filename=$(basename "$file")
+            echo "Uploading $filename"
+            curl \
+              -X POST \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@$file" \
+              "${{ steps.create_release.outputs.upload_url }}?name=$filename"
           done
         done
