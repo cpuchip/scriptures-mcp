@@ -15,13 +15,12 @@ cd "$TEMP_DIR"
 echo "Cloning scriptures-json repository..."
 git clone https://github.com/bcbooks/scriptures-json.git
 
-# Copy the data files to our data directory
 echo "Copying scripture data files..."
 cd scriptures-json
 
-# Get the directory of this script (should be the repository root)
+# Get the directory of this script (repository root)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DATA_DIR="$SCRIPT_DIR/data"
+DATA_DIR="$SCRIPT_DIR/internal/scripture/data"
 
 # Create data directory if it doesn't exist
 mkdir -p "$DATA_DIR"
@@ -47,4 +46,4 @@ rm -rf "$TEMP_DIR"
 
 echo ""
 echo "Data sync complete. You may want to commit these changes."
-echo "To see what changed, run: git diff --stat data/"
+echo "To see what changed, run: git diff --stat internal/scripture/data/"

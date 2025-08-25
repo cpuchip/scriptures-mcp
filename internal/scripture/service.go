@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -46,36 +47,92 @@ func NewService() *Service {
 
 // loadScriptures loads scripture data from JSON files
 func (s *Service) loadScriptures() {
-	// Determine the directory where the executable resides so the binary can
-	// locate its bundled data directory regardless of the current working directory.
-	exePath, err := os.Executable()
-	if err != nil {
-		fmt.Printf("Warning: could not determine executable path: %v (falling back to CWD)\n", err)
-	}
+	// Priority order:
+	// 1. SCRIPTURES_DATA_DIR override (external directory)
+	// 2. Embedded data (data/*.json in this package)
+	// 3. Executable-relative ./data (backward compatibility)
 
-	baseDir := ""
-	if exePath != "" {
-		baseDir = filepath.Dir(exePath)
-	}
-
-	// Allow override via environment variable (useful for testing or custom deployments)
 	if override := os.Getenv("SCRIPTURES_DATA_DIR"); override != "" {
-		baseDir = override
+		s.loadFromDir(override)
+		if len(s.scriptures) > 0 {
+			return
+		}
+		fmt.Printf("Warning: no scripture data loaded from override dir '%s'; falling back to embedded/exe data\n", override)
 	}
 
-	dataDir := filepath.Join(baseDir, "data")
+	// Attempt embedded data
+	s.loadFromEmbedded()
+	if len(s.scriptures) > 0 {
+		return
+	}
 
-	files := []string{
+	// Fallback: executable-relative data directory (legacy layout)
+	if exePath, err := os.Executable(); err == nil && exePath != "" {
+		baseDir := filepath.Dir(exePath)
+		s.loadFromDir(filepath.Join(baseDir, "data"))
+	}
+}
+
+// loadFromEmbedded loads scripture JSON from the embedded filesystem.
+func (s *Service) loadFromEmbedded() {
+	if embeddedData == (fs.FS)(nil) { // Shouldn't happen, but guard anyway
+		return
+	}
+	files := scriptureJSONFilenames()
+	for _, f := range files {
+		data, err := embeddedData.ReadFile("data/" + f)
+		if err != nil {
+			fmt.Printf("Warning: embedded read failed %s: %v\n", f, err)
+			continue
+		}
+		s.parseAndStore(data, f)
+	}
+}
+
+// loadFromDir loads scripture JSON files from a real directory on disk.
+func (s *Service) loadFromDir(dir string) {
+	files := scriptureJSONFilenames()
+	for _, f := range files {
+		path := filepath.Join(dir, f)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			fmt.Printf("Warning: Could not read %s: %v\n", path, err)
+			continue
+		}
+		s.parseAndStore(data, f)
+	}
+}
+
+// parseAndStore parses raw JSON scripture data and stores verses in memory.
+func (s *Service) parseAndStore(data []byte, label string) {
+	var scriptureData ScriptureData
+	if err := json.Unmarshal(data, &scriptureData); err != nil {
+		fmt.Printf("Warning: Could not parse %s: %v\n", label, err)
+		return
+	}
+	for _, book := range scriptureData.Books {
+		for _, chapter := range book.Chapters {
+			for _, verse := range chapter.Verses {
+				s.scriptures[book.Book] = append(s.scriptures[book.Book], Scripture{
+					Book:      book.Book,
+					Chapter:   chapter.Chapter,
+					Verse:     verse.Verse,
+					Text:      verse.Text,
+					Reference: verse.Reference,
+				})
+			}
+		}
+	}
+}
+
+// scriptureJSONFilenames returns the list of scripture JSON files expected.
+func scriptureJSONFilenames() []string {
+	return []string{
 		"book-of-mormon.json",
 		"doctrine-and-covenants.json",
 		"pearl-of-great-price.json",
 		"old-testament.json",
 		"new-testament.json",
-	}
-
-	for _, filename := range files {
-		fullPath := filepath.Join(dataDir, filename)
-		s.loadScriptureFile(fullPath)
 	}
 }
 
