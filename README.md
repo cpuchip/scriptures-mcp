@@ -281,6 +281,8 @@ To create a new release:
    - Create a GitHub release with the tag
    - Upload all binaries as release assets
 
+For detailed release instructions, see [RELEASE.md](RELEASE.md).
+
 ### Building from Source
 
 ```bash
