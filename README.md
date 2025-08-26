@@ -262,8 +262,24 @@ The project includes a comprehensive GitHub Actions workflow that:
   - Linux (amd64, arm64, 386, arm)
   - macOS (amd64, arm64) 
   - Windows (amd64, arm64, 386)
-- **Creates releases** automatically on main branch pushes
+- **Creates releases** when you push a version tag (e.g., `v1.0.0`)
 - **Uploads artifacts** for easy download
+
+#### Creating a Release
+
+To create a new release:
+
+1. Tag your commit with a version tag:
+   ```bash
+   git tag v1.0.0
+   git push origin v1.0.0
+   ```
+
+2. The GitHub Actions workflow will automatically:
+   - Run tests
+   - Build binaries for all supported platforms
+   - Create a GitHub release with the tag
+   - Upload all binaries as release assets
 
 ### Building from Source
 
