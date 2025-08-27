@@ -129,6 +129,53 @@ echo '{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVe
 {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "get_scripture", "arguments": {"query": "1 Nephi 3:7"}}}' | ./scriptures-mcp
 ```
 
+### JSON-RPC Troubleshooting
+
+If you encounter **"Parse error" (-32700)** responses, this typically means your JSON-RPC message is malformed. Common issues include:
+
+#### 1. Extra Quotes in Query Strings
+**❌ Incorrect:**
+```json
+{"query": ""see Jesus walking"}
+```
+**✅ Correct:**
+```json  
+{"query": "see Jesus walking"}
+```
+
+#### 2. Missing Commas
+**❌ Incorrect:**
+```json
+{"name": "search_scriptures" "arguments": {}}
+```
+**✅ Correct:**
+```json
+{"name": "search_scriptures", "arguments": {}}
+```
+
+#### 3. Unescaped Quotes
+**❌ Incorrect:**
+```json
+{"query": "Jesus said "I am the way""}
+```
+**✅ Correct:**
+```json
+{"query": "Jesus said \"I am the way\""}
+```
+
+#### JSON Validation Tool
+Use the included validation tool to check your JSON before sending:
+
+```bash
+# Validate JSON-RPC messages
+echo '{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "search_scriptures", "arguments": {"query": "faith"}}}' | go run tools/validate-json.go
+
+# Validate from file
+go run tools/validate-json.go < your-message.json
+```
+
+The validator will provide detailed error messages to help identify and fix JSON formatting issues.
+
 ## Data Sources
 
 ### Scripture Data Attribution
