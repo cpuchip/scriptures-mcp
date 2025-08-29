@@ -377,6 +377,81 @@ func TestService_performSearch(t *testing.T) {
 	}
 }
 
+func TestService_performFuzzySearch(t *testing.T) {
+	service := &Service{
+		scriptures: make(map[string][]Scripture),
+	}
+	
+	// Add test data with some typos and variations
+	service.scriptures["1 Nephi"] = []Scripture{
+		{Book: "1 Nephi", Chapter: 3, Verse: 7, Text: "I will go and do the things which the Lord hath commanded", Reference: "1 Nephi 3:7"},
+		{Book: "1 Nephi", Chapter: 17, Verse: 50, Text: "If God had commanded me to do all things I could do them", Reference: "1 Nephi 17:50"},
+	}
+	service.scriptures["John"] = []Scripture{
+		{Book: "John", Chapter: 3, Verse: 16, Text: "For God so loved the world", Reference: "John 3:16"},
+	}
+	
+	tests := []struct {
+		name           string
+		query          string
+		limit          int
+		minExpected    int  // At least this many results
+		shouldContain  string
+	}{
+		{
+			name:          "Exact match still works",
+			query:         "God",
+			limit:         10,
+			minExpected:   2, // At least the exact matches
+			shouldContain: "God",
+		},
+		{
+			name:          "Fuzzy match with typo - 'Good' should find God",
+			query:         "Good",
+			limit:         10,
+			minExpected:   2, // Should find the God references
+			shouldContain: "God",
+		},
+		{
+			name:          "Fuzzy match with case difference - 'lord'",
+			query:         "lord",
+			limit:         10,
+			minExpected:   1, // Should find Lord
+			shouldContain: "Lord",
+		},
+		{
+			name:          "No fuzzy matches for completely different word",
+			query:         "elephant",
+			limit:         10,
+			minExpected:   0,
+			shouldContain: "",
+		},
+	}
+	
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results := service.performSearch(tt.query, tt.limit)
+			
+			if len(results) < tt.minExpected {
+				t.Errorf("Expected at least %d results, got %d", tt.minExpected, len(results))
+			}
+			
+			if tt.minExpected > 0 {
+				found := false
+				for _, result := range results {
+					if strings.Contains(result.Text, tt.shouldContain) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected results to contain '%s'", tt.shouldContain)
+				}
+			}
+		})
+	}
+}
+
 func TestService_getScripturesByReference(t *testing.T) {
 	service := &Service{
 		scriptures: make(map[string][]Scripture),

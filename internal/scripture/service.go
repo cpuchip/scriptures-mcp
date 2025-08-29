@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/lithammer/fuzzysearch/fuzzy"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -323,10 +324,49 @@ func (s *Service) GetChapter(ctx context.Context, request mcp.CallToolRequest) (
 	return mcp.NewToolResultText(response), nil
 }
 
-// performSearch performs a keyword search through loaded scripture data
+// performSearch performs a fuzzy search through loaded scripture data
 func (s *Service) performSearch(query string, limit int) []Scripture {
 	var results []Scripture
 	queryLower := strings.ToLower(query)
+
+	// First, try exact matches (for backward compatibility)
+	exactResults := s.performExactSearch(queryLower, limit)
+	
+	// If we have enough exact matches, return them
+	if len(exactResults) >= limit {
+		return exactResults[:limit]
+	}
+	
+	results = append(results, exactResults...)
+	
+	// If we need more results, try fuzzy search
+	if len(results) < limit {
+		fuzzyResults := s.performFuzzySearch(query, limit-len(results))
+		
+		// Add fuzzy results, avoiding duplicates
+		for _, fuzzyResult := range fuzzyResults {
+			isDuplicate := false
+			for _, exactResult := range results {
+				if exactResult.Reference == fuzzyResult.Reference {
+					isDuplicate = true
+					break
+				}
+			}
+			if !isDuplicate {
+				results = append(results, fuzzyResult)
+				if len(results) >= limit {
+					break
+				}
+			}
+		}
+	}
+
+	return results
+}
+
+// performExactSearch performs exact keyword search (original implementation)
+func (s *Service) performExactSearch(queryLower string, limit int) []Scripture {
+	var results []Scripture
 
 	// Search through all loaded scriptures
 	for _, bookScriptures := range s.scriptures {
@@ -339,6 +379,78 @@ func (s *Service) performSearch(query string, limit int) []Scripture {
 				}
 			}
 		}
+	}
+
+	return results
+}
+
+// performFuzzySearch performs fuzzy search through loaded scripture data
+func (s *Service) performFuzzySearch(query string, limit int) []Scripture {
+	type scoreResult struct {
+		scripture Scripture
+		score     int
+	}
+	
+	var candidates []scoreResult
+	queryLower := strings.ToLower(query)
+
+	// Use a more conservative approach for fuzzy search
+	// Only do fuzzy search for queries that are likely to have typos and not exact matches
+	if len(queryLower) <= 3 {
+		return []Scripture{} // Too short or exact length for meaningful fuzzy search
+	}
+	
+	maxDistance := 1 // Very conservative - only 1 character difference allowed
+	if len(queryLower) > 5 {
+		maxDistance = 2 // Allow 2 character differences for longer queries
+	}
+
+	for _, bookScriptures := range s.scriptures {
+		for _, scripture := range bookScriptures {
+			textLower := strings.ToLower(scripture.Text)
+			bookLower := strings.ToLower(scripture.Book)
+			
+			// Search word by word in the text for better fuzzy matching
+			words := strings.Fields(textLower)
+			bestDistance := len(queryLower) + len(textLower) // Start with a high distance
+			
+			for _, word := range words {
+				distance := fuzzy.LevenshteinDistance(queryLower, word)
+				if distance < bestDistance {
+					bestDistance = distance
+				}
+			}
+			
+			// Also check the book name
+			bookDistance := fuzzy.LevenshteinDistance(queryLower, bookLower)
+			if bookDistance < bestDistance {
+				bestDistance = bookDistance
+			}
+			
+			// Only accept matches within our strict threshold and not exact matches
+			// (exact matches are already handled by performExactSearch)
+			if bestDistance > 0 && bestDistance <= maxDistance {
+				candidates = append(candidates, scoreResult{scripture: scripture, score: bestDistance})
+			}
+		}
+	}
+
+	// Sort by score (lower distance = better match)
+	for i := 0; i < len(candidates)-1; i++ {
+		for j := i + 1; j < len(candidates); j++ {
+			if candidates[i].score > candidates[j].score {
+				candidates[i], candidates[j] = candidates[j], candidates[i]
+			}
+		}
+	}
+
+	// Convert to results up to the limit
+	var results []Scripture
+	for i, candidate := range candidates {
+		if i >= limit {
+			break
+		}
+		results = append(results, candidate.scripture)
 	}
 
 	return results
