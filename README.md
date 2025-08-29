@@ -29,6 +29,18 @@ Supports multiple reference formats:
 - Verse ranges: `"John 3:16-17"`, `"Matthew 5:3-12"` 
 - Full chapters: `"1 Nephi 3"`, `"Matthew 5"`
 
+### Fuzzy Search
+The server now includes intelligent fuzzy search capabilities:
+- **Typo Tolerance**: Finds matches even with minor spelling errors (e.g., "faithh" → "faith")
+- **Smart Matching**: Uses Levenshtein distance algorithm for accurate results
+- **Conservative Approach**: Only applies fuzzy search when needed to avoid false positives
+- **Hybrid Search**: Combines exact matching with fuzzy search for optimal results
+
+Examples:
+- `"lovve"` finds scriptures containing "love"
+- `"faithh"` finds scriptures containing "faith"  
+- `"commanded"` works exactly as before (exact matches prioritized)
+
 ## Installation
 
 ### Prerequisites
@@ -321,4 +333,5 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 - Scripture content from [bcbooks/scriptures-json](https://github.com/bcbooks/scriptures-json) 
 - Built using [mark3labs/mcp-go](https://github.com/mark3labs/mcp-go)
+- Fuzzy search powered by [@lithammer/fuzzysearch](https://github.com/lithammer/fuzzysearch)
 - Based on the Model Context Protocol specification
