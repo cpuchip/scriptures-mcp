@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -19,11 +20,12 @@ import (
 
 // Scripture represents a scripture verse
 type Scripture struct {
-	Book      string `json:"book"`
-	Chapter   int    `json:"chapter"`
-	Verse     int    `json:"verse"`
-	Text      string `json:"text"`
-	Reference string `json:"reference"`
+	Book       string `json:"book"`
+	Collection string `json:"collection"` // e.g., "Book of Mormon", "New Testament"
+	Chapter    int    `json:"chapter"`
+	Verse      int    `json:"verse"`
+	Text       string `json:"text"`
+	Reference  string `json:"reference"`
 }
 
 // ScriptureReference represents a parsed scripture reference
@@ -37,12 +39,14 @@ type ScriptureReference struct {
 // Service handles scripture operations
 type Service struct {
 	scriptures map[string][]Scripture // Map of book name to scriptures
+	collections map[string][]string   // Map of collection name to list of book names
 }
 
 // NewService creates a new scripture service
 func NewService() *Service {
 	service := &Service{
-		scriptures: make(map[string][]Scripture),
+		scriptures:  make(map[string][]Scripture),
+		collections: make(map[string][]string),
 	}
 	service.loadScriptures()
 	return service
@@ -161,19 +165,31 @@ func (s *Service) parseAndStore(data []byte, label string) {
 		fmt.Printf("Warning: Could not parse %s: %v\n", label, err)
 		return
 	}
+	
+	// Determine collection name from filename
+	collection := getCollectionName(label)
+	
+	// Track books in this collection
+	var booksInCollection []string
+	
 	for _, book := range scriptureData.Books {
+		booksInCollection = append(booksInCollection, book.Book)
 		for _, chapter := range book.Chapters {
 			for _, verse := range chapter.Verses {
 				s.scriptures[book.Book] = append(s.scriptures[book.Book], Scripture{
-					Book:      book.Book,
-					Chapter:   chapter.Chapter,
-					Verse:     verse.Verse,
-					Text:      verse.Text,
-					Reference: verse.Reference,
+					Book:       book.Book,
+					Collection: collection,
+					Chapter:    chapter.Chapter,
+					Verse:      verse.Verse,
+					Text:       verse.Text,
+					Reference:  verse.Reference,
 				})
 			}
 		}
 	}
+	
+	// Store collection mapping
+	s.collections[collection] = booksInCollection
 }
 
 // scriptureJSONFilenames returns the list of scripture JSON files expected.
@@ -184,6 +200,24 @@ func scriptureJSONFilenames() []string {
 		"pearl-of-great-price.json",
 		"old-testament.json",
 		"new-testament.json",
+	}
+}
+
+// getCollectionName converts filename to readable collection name
+func getCollectionName(filename string) string {
+	switch {
+	case strings.Contains(filename, "book-of-mormon"):
+		return "Book of Mormon"
+	case strings.Contains(filename, "doctrine-and-covenants"):
+		return "Doctrine and Covenants"
+	case strings.Contains(filename, "pearl-of-great-price"):
+		return "Pearl of Great Price"
+	case strings.Contains(filename, "old-testament"):
+		return "Old Testament"
+	case strings.Contains(filename, "new-testament"):
+		return "New Testament"
+	default:
+		return "Unknown"
 	}
 }
 
@@ -248,14 +282,43 @@ func (s *Service) SearchScriptures(ctx context.Context, request mcp.CallToolRequ
 		}
 	}
 
-	// Perform the search
-	results := s.performSearch(query, limit)
-
-	if len(results) == 0 {
-		return mcp.NewToolResultText(fmt.Sprintf("No scriptures found matching '%s'. Try different keywords or check spelling.", query)), nil
+	// Get optional book filter
+	book := ""
+	if bookVal, exists := arguments["book"]; exists {
+		if bookStr, ok := bookVal.(string); ok {
+			book = bookStr
+		}
 	}
 
-	response := fmt.Sprintf("Scripture Search Results for '%s':\n\n", query)
+	// Get optional collection filter
+	collection := ""
+	if collectionVal, exists := arguments["collection"]; exists {
+		if collectionStr, ok := collectionVal.(string); ok {
+			collection = collectionStr
+		}
+	}
+
+	// Perform the search with filters
+	results := s.performSearchWithFilters(query, limit, book, collection)
+
+	if len(results) == 0 {
+		filterInfo := ""
+		if book != "" {
+			filterInfo = fmt.Sprintf(" in book '%s'", book)
+		} else if collection != "" {
+			filterInfo = fmt.Sprintf(" in collection '%s'", collection)
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("No scriptures found matching '%s'%s. Try different keywords or check spelling.", query, filterInfo)), nil
+	}
+
+	response := fmt.Sprintf("Scripture Search Results for '%s'", query)
+	if book != "" {
+		response += fmt.Sprintf(" in book '%s'", book)
+	} else if collection != "" {
+		response += fmt.Sprintf(" in collection '%s'", collection)
+	}
+	response += ":\n\n"
+
 	for i, result := range results {
 		response += fmt.Sprintf("%d. %s %d:%d - %s\n\n", i+1, result.Book, result.Chapter, result.Verse, result.Text)
 	}
@@ -325,21 +388,75 @@ func (s *Service) GetChapter(ctx context.Context, request mcp.CallToolRequest) (
 
 // performSearch performs a keyword search through loaded scripture data
 func (s *Service) performSearch(query string, limit int) []Scripture {
+	return s.performSearchWithFilters(query, limit, "", "")
+}
+
+// performSearchWithFilters performs a keyword search with optional book and collection filters
+func (s *Service) performSearchWithFilters(query string, limit int, book string, collection string) []Scripture {
 	var results []Scripture
 	queryLower := strings.ToLower(query)
+	collectionLower := strings.ToLower(collection)
 
-	// Search through all loaded scriptures
-	for _, bookScriptures := range s.scriptures {
-		for _, scripture := range bookScriptures {
-			if strings.Contains(strings.ToLower(scripture.Text), queryLower) ||
-				strings.Contains(strings.ToLower(scripture.Book), queryLower) {
-				results = append(results, scripture)
-				if len(results) >= limit {
-					return results
+	// Define search order to ensure consistent results
+	var searchOrder []string
+	if book != "" {
+		// Search only in specified book
+		if _, exists := s.scriptures[book]; exists {
+			searchOrder = []string{book}
+		}
+	} else if collection != "" {
+		// Search only in books from specified collection
+		for collectionName, books := range s.collections {
+			if strings.ToLower(collectionName) == collectionLower {
+				searchOrder = books
+				break
+			}
+		}
+	} else {
+		// Search all books in consistent order
+		for bookName := range s.scriptures {
+			searchOrder = append(searchOrder, bookName)
+		}
+		sort.Strings(searchOrder) // Ensure consistent order
+	}
+
+	// Search through scriptures in determined order
+	for _, bookName := range searchOrder {
+		if bookScriptures, exists := s.scriptures[bookName]; exists {
+			for _, scripture := range bookScriptures {
+				// Apply filters
+				if book != "" && !strings.EqualFold(scripture.Book, book) {
+					continue
+				}
+				if collection != "" && !strings.EqualFold(scripture.Collection, collection) {
+					continue
+				}
+
+				// Check if text matches query
+				if strings.Contains(strings.ToLower(scripture.Text), queryLower) ||
+					strings.Contains(strings.ToLower(scripture.Book), queryLower) {
+					results = append(results, scripture)
+					if len(results) >= limit {
+						return results
+					}
 				}
 			}
 		}
 	}
+
+	// Sort results for consistency (by Collection, Book, Chapter, Verse)
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].Collection != results[j].Collection {
+			return results[i].Collection < results[j].Collection
+		}
+		if results[i].Book != results[j].Book {
+			return results[i].Book < results[j].Book
+		}
+		if results[i].Chapter != results[j].Chapter {
+			return results[i].Chapter < results[j].Chapter
+		}
+		return results[i].Verse < results[j].Verse
+	})
 
 	return results
 }
@@ -420,7 +537,7 @@ func (s *Service) getScripturesByReference(ref *ScriptureReference) []Scripture 
 	return results
 }
 
-// getChapter retrieves an entire chapter from loaded data
+//getChapter retrieves an entire chapter from loaded data
 func (s *Service) getChapter(book string, chapter int) []Scripture {
 	var results []Scripture
 
@@ -434,4 +551,193 @@ func (s *Service) getChapter(book string, chapter int) []Scripture {
 	}
 
 	return results
+}
+
+// ListBooks lists all available books, optionally filtered by collection
+func (s *Service) ListBooks(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	arguments := request.GetArguments()
+
+	collection := ""
+	if collectionVal, exists := arguments["collection"]; exists {
+		if collectionStr, ok := collectionVal.(string); ok {
+			collection = collectionStr
+		}
+	}
+
+	if collection != "" {
+		// List books in specific collection
+		collectionLower := strings.ToLower(collection)
+		for collectionName, books := range s.collections {
+			if strings.ToLower(collectionName) == collectionLower {
+				response := fmt.Sprintf("Books in %s:\n\n", collectionName)
+				for i, book := range books {
+					response += fmt.Sprintf("%d. %s\n", i+1, book)
+				}
+				return mcp.NewToolResultText(response), nil
+			}
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("Collection '%s' not found.", collection)), nil
+	}
+
+	// List all collections and their books
+	response := "Scripture Collections and Books:\n\n"
+	collectionNames := make([]string, 0, len(s.collections))
+	for name := range s.collections {
+		collectionNames = append(collectionNames, name)
+	}
+	sort.Strings(collectionNames)
+
+	for _, collectionName := range collectionNames {
+		books := s.collections[collectionName]
+		response += fmt.Sprintf("## %s (%d books)\n", collectionName, len(books))
+		for _, book := range books {
+			response += fmt.Sprintf("- %s\n", book)
+		}
+		response += "\n"
+	}
+
+	return mcp.NewToolResultText(response), nil
+}
+
+// ListCollections lists all available scripture collections
+func (s *Service) ListCollections(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	response := "Available Scripture Collections:\n\n"
+	collectionNames := make([]string, 0, len(s.collections))
+	for name := range s.collections {
+		collectionNames = append(collectionNames, name)
+	}
+	sort.Strings(collectionNames)
+
+	for i, name := range collectionNames {
+		bookCount := len(s.collections[name])
+		response += fmt.Sprintf("%d. %s (%d books)\n", i+1, name, bookCount)
+	}
+
+	return mcp.NewToolResultText(response), nil
+}
+
+// GetTermCounts counts occurrences of terms with optional filtering
+func (s *Service) GetTermCounts(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	arguments := request.GetArguments()
+
+	terms, ok := arguments["terms"].([]interface{})
+	if !ok || len(terms) == 0 {
+		return mcp.NewToolResultError("terms array cannot be empty"), nil
+	}
+
+	// Convert interface{} slice to string slice
+	var termStrings []string
+	for _, term := range terms {
+		if termStr, ok := term.(string); ok {
+			termStrings = append(termStrings, termStr)
+		}
+	}
+
+	if len(termStrings) == 0 {
+		return mcp.NewToolResultError("no valid terms provided"), nil
+	}
+
+	// Get optional filters
+	book := ""
+	if bookVal, exists := arguments["book"]; exists {
+		if bookStr, ok := bookVal.(string); ok {
+			book = bookStr
+		}
+	}
+
+	collection := ""
+	if collectionVal, exists := arguments["collection"]; exists {
+		if collectionStr, ok := collectionVal.(string); ok {
+			collection = collectionStr
+		}
+	}
+
+	ignoreCommon := true // default to ignore common words
+	if ignoreVal, exists := arguments["ignore_common_words"]; exists {
+		if ignoreBool, ok := ignoreVal.(bool); ok {
+			ignoreCommon = ignoreBool
+		}
+	}
+
+	// Count terms
+	termCounts := s.countTerms(termStrings, book, collection, ignoreCommon)
+
+	// Format response
+	response := "Term Counts"
+	if book != "" {
+		response += fmt.Sprintf(" in book '%s'", book)
+	} else if collection != "" {
+		response += fmt.Sprintf(" in collection '%s'", collection)
+	}
+	response += ":\n\n"
+
+	for _, term := range termStrings {
+		count := termCounts[strings.ToLower(term)]
+		response += fmt.Sprintf("'%s': %d occurrences\n", term, count)
+	}
+
+	return mcp.NewToolResultText(response), nil
+}
+
+// countTerms counts occurrences of terms with filtering options
+func (s *Service) countTerms(terms []string, book string, collection string, ignoreCommon bool) map[string]int {
+	counts := make(map[string]int)
+	
+	// Common words to ignore if ignoreCommon is true
+	commonWords := map[string]bool{
+		"a": true, "an": true, "and": true, "are": true, "as": true, "at": true, "be": true, "by": true,
+		"for": true, "from": true, "has": true, "he": true, "in": true, "is": true, "it": true,
+		"its": true, "of": true, "on": true, "that": true, "the": true, "to": true, "was": true,
+		"will": true, "with": true, "his": true, "her": true, "him": true, "she": true, "they": true,
+		"their": true, "them": true, "this": true, "these": true, "those": true, "have": true,
+	}
+
+	// Initialize counts
+	for _, term := range terms {
+		counts[strings.ToLower(term)] = 0
+	}
+
+	// Determine which books to search
+	var searchBooks []string
+	if book != "" {
+		searchBooks = []string{book}
+	} else if collection != "" {
+		collectionLower := strings.ToLower(collection)
+		for collectionName, books := range s.collections {
+			if strings.ToLower(collectionName) == collectionLower {
+				searchBooks = books
+				break
+			}
+		}
+	} else {
+		for bookName := range s.scriptures {
+			searchBooks = append(searchBooks, bookName)
+		}
+	}
+
+	// Count occurrences
+	for _, bookName := range searchBooks {
+		if bookScriptures, exists := s.scriptures[bookName]; exists {
+			for _, scripture := range bookScriptures {
+				text := strings.ToLower(scripture.Text)
+				words := strings.FieldsFunc(text, func(r rune) bool {
+					return !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '\'')
+				})
+
+				for _, word := range words {
+					word = strings.ToLower(strings.Trim(word, "'"))
+					if ignoreCommon && commonWords[word] {
+						continue
+					}
+					for _, term := range terms {
+						if word == strings.ToLower(term) {
+							counts[strings.ToLower(term)]++
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return counts
 }
