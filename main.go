@@ -29,6 +29,15 @@ func main() {
 		mcp.WithNumber("limit",
 			mcp.Description("Maximum number of results to return (default: 10)"),
 		),
+		mcp.WithString("book",
+			mcp.Description("Optional: filter results to a specific book (e.g., '1 Nephi', 'John')"),
+		),
+		mcp.WithString("collection",
+			mcp.Description("Optional: filter results to a specific collection (e.g., 'Book of Mormon', 'New Testament')"),
+		),
+		mcp.WithString("reference",
+			mcp.Description("Optional: filter results to a specific reference like '2 Nephi 9' for a chapter or '2 Nephi' for entire book"),
+		),
 	)
 	mcpServer.AddTool(searchTool, scriptureService.SearchScriptures)
 	
@@ -51,6 +60,44 @@ func main() {
 		),
 	)
 	mcpServer.AddTool(getChapterTool, scriptureService.GetChapter)
+	
+	// Create and register list_collections tool
+	listCollectionsTool := mcp.NewTool("list_collections",
+		mcp.WithDescription("List all available scripture collections (Book of Mormon, New Testament, etc.)"),
+	)
+	mcpServer.AddTool(listCollectionsTool, scriptureService.ListCollections)
+	
+	// Create and register list_books tool
+	listBooksTool := mcp.NewTool("list_books",
+		mcp.WithDescription("List all available books, optionally filtered by collection"),
+		mcp.WithString("collection",
+			mcp.Description("Optional: filter to books within a specific collection"),
+		),
+	)
+	mcpServer.AddTool(listBooksTool, scriptureService.ListBooks)
+	
+	// Create and register term_counts tool
+	termCountsTool := mcp.NewTool("term_counts",
+		mcp.WithDescription("Count occurrences of specific terms with optional filtering"),
+		mcp.WithArray("terms",
+			mcp.Required(),
+			mcp.Items(mcp.WithString("term", mcp.Description("Term to count"))),
+			mcp.Description("Array of terms to count occurrences of"),
+		),
+		mcp.WithString("book",
+			mcp.Description("Optional: filter to a specific book"),
+		),
+		mcp.WithString("collection",
+			mcp.Description("Optional: filter to a specific collection"),
+		),
+		mcp.WithString("reference", 
+			mcp.Description("Optional: filter to a specific reference like '2 Nephi 9' or just '2 Nephi' for entire book"),
+		),
+		mcp.WithBoolean("ignore_common_words",
+			mcp.Description("Whether to ignore common words like 'the', 'and', etc. (default: true)"),
+		),
+	)
+	mcpServer.AddTool(termCountsTool, scriptureService.GetTermCounts)
 	
 	// Start the stdio server
 	if err := server.ServeStdio(mcpServer); err != nil {
