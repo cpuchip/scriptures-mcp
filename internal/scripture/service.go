@@ -298,12 +298,22 @@ func (s *Service) SearchScriptures(ctx context.Context, request mcp.CallToolRequ
 		}
 	}
 
+	// Get optional reference filter
+	reference := ""
+	if refVal, exists := arguments["reference"]; exists {
+		if refStr, ok := refVal.(string); ok {
+			reference = refStr
+		}
+	}
+
 	// Perform the search with filters
-	results := s.performSearchWithFilters(query, limit, book, collection)
+	results := s.performSearchWithReference(query, limit, book, collection, reference)
 
 	if len(results) == 0 {
 		filterInfo := ""
-		if book != "" {
+		if reference != "" {
+			filterInfo = fmt.Sprintf(" in %s", reference)
+		} else if book != "" {
 			filterInfo = fmt.Sprintf(" in book '%s'", book)
 		} else if collection != "" {
 			filterInfo = fmt.Sprintf(" in collection '%s'", collection)
@@ -312,7 +322,9 @@ func (s *Service) SearchScriptures(ctx context.Context, request mcp.CallToolRequ
 	}
 
 	response := fmt.Sprintf("Scripture Search Results for '%s'", query)
-	if book != "" {
+	if reference != "" {
+		response += fmt.Sprintf(" in %s", reference)
+	} else if book != "" {
 		response += fmt.Sprintf(" in book '%s'", book)
 	} else if collection != "" {
 		response += fmt.Sprintf(" in collection '%s'", collection)
@@ -445,6 +457,72 @@ func (s *Service) performSearchWithFilters(query string, limit int, book string,
 	}
 
 	// Sort results for consistency (by Collection, Book, Chapter, Verse)
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].Collection != results[j].Collection {
+			return results[i].Collection < results[j].Collection
+		}
+		if results[i].Book != results[j].Book {
+			return results[i].Book < results[j].Book
+		}
+		if results[i].Chapter != results[j].Chapter {
+			return results[i].Chapter < results[j].Chapter
+		}
+		return results[i].Verse < results[j].Verse
+	})
+
+	return results
+}
+
+// performSearchWithReference performs search with reference-level filtering
+func (s *Service) performSearchWithReference(query string, limit int, book string, collection string, reference string) []Scripture {
+	var results []Scripture
+	queryLower := strings.ToLower(query)
+
+	// If reference is specified, try to parse it as a chapter reference
+	var refBook string
+	var refChapter int
+	if reference != "" {
+		if parsedRef, err := s.parseChapterReference(reference); err == nil {
+			refBook = parsedRef.Book
+			refChapter = parsedRef.Chapter
+		} else {
+			// If parsing fails, treat as book name
+			refBook = reference
+			refChapter = -1 // All chapters
+		}
+	}
+
+	// Determine search scope
+	var scripturesToSearch []Scripture
+	if reference != "" {
+		// Search specific reference
+		if refChapter != -1 {
+			// Specific chapter
+			chapterScriptures := s.getChapter(refBook, refChapter)
+			scripturesToSearch = chapterScriptures
+		} else {
+			// All chapters in book
+			if bookScriptures, exists := s.scriptures[refBook]; exists {
+				scripturesToSearch = bookScriptures
+			}
+		}
+	} else {
+		// Use existing filtering logic
+		return s.performSearchWithFilters(query, limit, book, collection)
+	}
+
+	// Search through determined scriptures
+	for _, scripture := range scripturesToSearch {
+		if strings.Contains(strings.ToLower(scripture.Text), queryLower) ||
+			strings.Contains(strings.ToLower(scripture.Book), queryLower) {
+			results = append(results, scripture)
+			if len(results) >= limit {
+				break
+			}
+		}
+	}
+
+	// Sort results for consistency
 	sort.Slice(results, func(i, j int) bool {
 		if results[i].Collection != results[j].Collection {
 			return results[i].Collection < results[j].Collection
@@ -652,6 +730,14 @@ func (s *Service) GetTermCounts(ctx context.Context, request mcp.CallToolRequest
 		}
 	}
 
+	// Get optional reference filter (e.g., "2 Nephi 9")
+	reference := ""
+	if refVal, exists := arguments["reference"]; exists {
+		if refStr, ok := refVal.(string); ok {
+			reference = refStr
+		}
+	}
+
 	ignoreCommon := true // default to ignore common words
 	if ignoreVal, exists := arguments["ignore_common_words"]; exists {
 		if ignoreBool, ok := ignoreVal.(bool); ok {
@@ -660,11 +746,13 @@ func (s *Service) GetTermCounts(ctx context.Context, request mcp.CallToolRequest
 	}
 
 	// Count terms
-	termCounts := s.countTerms(termStrings, book, collection, ignoreCommon)
+	termCounts := s.countTermsWithReference(termStrings, book, collection, reference, ignoreCommon)
 
 	// Format response
 	response := "Term Counts"
-	if book != "" {
+	if reference != "" {
+		response += fmt.Sprintf(" in %s", reference)
+	} else if book != "" {
 		response += fmt.Sprintf(" in book '%s'", book)
 	} else if collection != "" {
 		response += fmt.Sprintf(" in collection '%s'", collection)
@@ -734,6 +822,100 @@ func (s *Service) countTerms(terms []string, book string, collection string, ign
 							counts[strings.ToLower(term)]++
 						}
 					}
+				}
+			}
+		}
+	}
+
+	return counts
+}
+
+// countTermsWithReference counts terms with support for chapter-level references
+func (s *Service) countTermsWithReference(terms []string, book string, collection string, reference string, ignoreCommon bool) map[string]int {
+	counts := make(map[string]int)
+	
+	// Common words to ignore if ignoreCommon is true
+	commonWords := map[string]bool{
+		"a": true, "an": true, "and": true, "are": true, "as": true, "at": true, "be": true, "by": true,
+		"for": true, "from": true, "has": true, "he": true, "in": true, "is": true, "it": true,
+		"its": true, "of": true, "on": true, "that": true, "the": true, "to": true, "was": true,
+		"will": true, "with": true, "his": true, "her": true, "him": true, "she": true, "they": true,
+		"their": true, "them": true, "this": true, "these": true, "those": true, "have": true,
+	}
+
+	// Initialize counts
+	for _, term := range terms {
+		counts[strings.ToLower(term)] = 0
+	}
+
+	// If reference is specified, try to parse it as a chapter reference
+	var refBook string
+	var refChapter int
+	if reference != "" {
+		if parsedRef, err := s.parseChapterReference(reference); err == nil {
+			refBook = parsedRef.Book
+			refChapter = parsedRef.Chapter
+		} else {
+			// If parsing fails, treat as book name
+			refBook = reference
+			refChapter = -1 // All chapters
+		}
+	}
+
+	// Determine which scriptures to search
+	var scripturesToSearch []Scripture
+	if reference != "" {
+		// Search specific reference
+		if refChapter != -1 {
+			// Specific chapter
+			chapterScriptures := s.getChapter(refBook, refChapter)
+			scripturesToSearch = chapterScriptures
+		} else {
+			// All chapters in book
+			if bookScriptures, exists := s.scriptures[refBook]; exists {
+				scripturesToSearch = bookScriptures
+			}
+		}
+	} else if book != "" {
+		// Search specific book
+		if bookScriptures, exists := s.scriptures[book]; exists {
+			scripturesToSearch = bookScriptures
+		}
+	} else if collection != "" {
+		// Search specific collection
+		collectionLower := strings.ToLower(collection)
+		for collectionName, books := range s.collections {
+			if strings.ToLower(collectionName) == collectionLower {
+				for _, bookName := range books {
+					if bookScriptures, exists := s.scriptures[bookName]; exists {
+						scripturesToSearch = append(scripturesToSearch, bookScriptures...)
+					}
+				}
+				break
+			}
+		}
+	} else {
+		// Search all scriptures
+		for _, bookScriptures := range s.scriptures {
+			scripturesToSearch = append(scripturesToSearch, bookScriptures...)
+		}
+	}
+
+	// Count occurrences
+	for _, scripture := range scripturesToSearch {
+		text := strings.ToLower(scripture.Text)
+		words := strings.FieldsFunc(text, func(r rune) bool {
+			return !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '\'')
+		})
+
+		for _, word := range words {
+			word = strings.ToLower(strings.Trim(word, "'"))
+			if ignoreCommon && commonWords[word] {
+				continue
+			}
+			for _, term := range terms {
+				if word == strings.ToLower(term) {
+					counts[strings.ToLower(term)]++
 				}
 			}
 		}

@@ -239,18 +239,87 @@ func TestService_GetTermCounts(t *testing.T) {
 		collections: make(map[string][]string),
 	}
 
-	// Add test data
+	// Add test data with known term counts
 	service.scriptures["1 Nephi"] = []Scripture{
 		{Book: "1 Nephi", Collection: "Book of Mormon", Chapter: 3, Verse: 7, Text: "I will go and do the things which the Lord hath commanded", Reference: "1 Nephi 3:7"},
 		{Book: "1 Nephi", Collection: "Book of Mormon", Chapter: 3, Verse: 8, Text: "And it came to pass that when my father had heard these words he was exceedingly glad, for he knew that I had been blessed of the Lord.", Reference: "1 Nephi 3:8"},
 	}
 	service.collections["Book of Mormon"] = []string{"1 Nephi"}
 
+	// Test term counting
+	termCounts := service.countTerms([]string{"Lord", "the", "and"}, "1 Nephi", "", true)
+	
+	// "Lord" appears twice (once in each verse)
+	if termCounts["lord"] != 2 {
+		t.Errorf("Expected 'Lord' count to be 2, got %d", termCounts["lord"])
+	}
+	
+	// "the" should be ignored as common word
+	if termCounts["the"] != 0 {
+		t.Errorf("Expected 'the' count to be 0 (ignored), got %d", termCounts["the"])
+	}
+
+	// Test without ignoring common words
+	termCounts = service.countTerms([]string{"the"}, "1 Nephi", "", false)
+	if termCounts["the"] == 0 {
+		t.Error("Expected 'the' count to be > 0 when not ignoring common words")
+	}
+
+	// Test MCP interface
 	request := mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
 			Arguments: map[string]interface{}{
-				"terms": []interface{}{"Lord", "the", "faith"},
+				"terms": []interface{}{"Lord", "faith"},
 				"book":  "1 Nephi",
+			},
+		},
+	}
+	result, err := service.GetTermCounts(context.Background(), request)
+
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	if result.IsError {
+		t.Error("Expected success but got error result")
+	}
+}
+
+// TestService_GetTermCountsWithReference tests term counting with chapter references
+func TestService_GetTermCountsWithReference(t *testing.T) {
+	service := &Service{
+		scriptures:  make(map[string][]Scripture),
+		collections: make(map[string][]string),
+	}
+
+	// Add test data
+	service.scriptures["2 Nephi"] = []Scripture{
+		{Book: "2 Nephi", Collection: "Book of Mormon", Chapter: 9, Verse: 28, Text: "O that cunning plan of the evil one! O the vainness, and the frailties, and the foolishness of men!", Reference: "2 Nephi 9:28"},
+		{Book: "2 Nephi", Collection: "Book of Mormon", Chapter: 10, Verse: 1, Text: "And now I, Jacob, speak unto you again, my beloved brethren", Reference: "2 Nephi 10:1"},
+	}
+	service.collections["Book of Mormon"] = []string{"2 Nephi"}
+
+	// Test with chapter reference
+	termCounts := service.countTermsWithReference([]string{"the", "and"}, "", "", "2 Nephi 9", false)
+	
+	// "the" appears multiple times in 2 Nephi 9:28 but not in 10:1, so should be > 0 but less than total
+	chapter9Count := termCounts["the"]
+	
+	// Now test entire book
+	termCountsBook := service.countTermsWithReference([]string{"the"}, "2 Nephi", "", "", false)
+	bookCount := termCountsBook["the"]
+	
+	// Book count should be >= chapter count
+	if bookCount < chapter9Count {
+		t.Errorf("Book count (%d) should be >= chapter count (%d)", bookCount, chapter9Count)
+	}
+
+	// Test MCP interface with reference
+	request := mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
+			Arguments: map[string]interface{}{
+				"terms":     []interface{}{"plan", "evil"},
+				"reference": "2 Nephi 9",
 			},
 		},
 	}
@@ -337,4 +406,55 @@ func TestService_SearchScripturesWithFilters(t *testing.T) {
 			}
 		})
 	}
+}
+// TestService_SearchWithReference tests search with chapter references
+func TestService_SearchWithReference(t *testing.T) {
+service := &Service{
+scriptures:  make(map[string][]Scripture),
+collections: make(map[string][]string),
+}
+
+// Add test data
+service.scriptures["2 Nephi"] = []Scripture{
+{Book: "2 Nephi", Collection: "Book of Mormon", Chapter: 9, Verse: 28, Text: "O that cunning plan of the evil one! O the vainness, and the frailties, and the foolishness of men!", Reference: "2 Nephi 9:28"},
+{Book: "2 Nephi", Collection: "Book of Mormon", Chapter: 10, Verse: 1, Text: "And now I, Jacob, speak unto you again, my beloved brethren", Reference: "2 Nephi 10:1"},
+}
+service.collections["Book of Mormon"] = []string{"2 Nephi"}
+
+// Test search in specific chapter
+results := service.performSearchWithReference("plan", 10, "", "", "2 Nephi 9")
+if len(results) != 1 {
+t.Errorf("Expected 1 result for 'plan' in '2 Nephi 9', got %d", len(results))
+}
+if len(results) > 0 && results[0].Chapter != 9 {
+t.Errorf("Expected result from chapter 9, got chapter %d", results[0].Chapter)
+}
+
+// Test search in entire book
+results = service.performSearchWithReference("Jacob", 10, "", "", "2 Nephi")
+if len(results) != 1 {
+t.Errorf("Expected 1 result for 'Jacob' in '2 Nephi', got %d", len(results))
+}
+if len(results) > 0 && results[0].Chapter != 10 {
+t.Errorf("Expected result from chapter 10, got chapter %d", results[0].Chapter)
+}
+
+// Test MCP interface with reference
+request := mcp.CallToolRequest{
+Params: mcp.CallToolParams{
+Arguments: map[string]interface{}{
+"query":     "plan",
+"reference": "2 Nephi 9",
+},
+},
+}
+result, err := service.SearchScriptures(context.Background(), request)
+
+if err != nil {
+t.Errorf("Unexpected error: %v", err)
+}
+
+if result.IsError {
+t.Error("Expected success but got error result")
+}
 }

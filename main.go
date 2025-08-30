@@ -35,6 +35,9 @@ func main() {
 		mcp.WithString("collection",
 			mcp.Description("Optional: filter results to a specific collection (e.g., 'Book of Mormon', 'New Testament')"),
 		),
+		mcp.WithString("reference",
+			mcp.Description("Optional: filter results to a specific reference like '2 Nephi 9' for a chapter or '2 Nephi' for entire book"),
+		),
 	)
 	mcpServer.AddTool(searchTool, scriptureService.SearchScriptures)
 	
@@ -86,6 +89,9 @@ func main() {
 		),
 		mcp.WithString("collection",
 			mcp.Description("Optional: filter to a specific collection"),
+		),
+		mcp.WithString("reference", 
+			mcp.Description("Optional: filter to a specific reference like '2 Nephi 9' or just '2 Nephi' for entire book"),
 		),
 		mcp.WithBoolean("ignore_common_words",
 			mcp.Description("Whether to ignore common words like 'the', 'and', etc. (default: true)"),
